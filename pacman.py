@@ -11,13 +11,14 @@ from rich.align import Align
 from rich import box
 from rich.live import Live
 
+
 console = Console()
 
 CELL = {
-    '.': Text('·', style='white'),
-    'o': Text('●', style='bold cyan'),
-    'P': Text('ᗤ', style='bold yellow'),
-    'x': Text('ᗣ', style='bold red'),
+    0: Text('·', style='white'),
+    3: Text('●', style='bold cyan'),
+    1: Text('ᗤ', style='bold yellow'),
+    2: Text('ᗣ', style='bold red'),
 }
 
 PACMAN_CHARS = {
@@ -36,34 +37,34 @@ class PacMan:
 
     def move(self, game, direction='R'):
         self.direction = direction
-        game.arena[self.position[0], self.position[1]] = '.'
+        game.arena[self.position[0], self.position[1]] = 0
         if not game.gameover:
             if game.respawn:
                 self.respawn(game)
             else:
                 self.position = (self.position + game.moves[direction]) % 15
-                if game.arena[self.position[0], self.position[1]] == 'o':
+                if game.arena[self.position[0], self.position[1]] == 3:
                     game.score += 1
                     for i, reward in enumerate(game.rewards):
                         if np.array_equal(reward.position, self.position):
                             game.rewards.pop(i)
                             break
-                    game.arena[self.position[0], self.position[1]] = 'P'
-                elif game.arena[self.position[0], self.position[1]] == 'x':
+                    game.arena[self.position[0], self.position[1]] = 1
+                elif game.arena[self.position[0], self.position[1]] == 2:
                     game.lives -= 1
                     if game.lives == 0:
                         game.gameover = True
                     else:
                         self.respawn(game)
                 else:
-                    game.arena[self.position[0], self.position[1]] = 'P'
+                    game.arena[self.position[0], self.position[1]] = 1
 
     def respawn(self, game):
         candidates = np.array([[0, 0], [0, 14], [14, 0], [14, 14]])
         distances = np.linalg.norm(candidates[:, np.newaxis] - self.position, axis=2)
         self.position = candidates[np.argmax(distances.sum(axis=1))]
         game.respawn = False
-        game.arena[self.position[0], self.position[1]] = 'P'
+        game.arena[self.position[0], self.position[1]] = 1
 
 
 class Reward:
@@ -92,7 +93,7 @@ class Ghost:
                 break
 
     def move(self, game):
-        game.arena[self.position[0], self.position[1]] = ('o' if any(np.array_equal(self.position, reward.position) for reward in game.rewards) else '.')
+        game.arena[self.position[0], self.position[1]] = (3 if any(np.array_equal(self.position, reward.position) for reward in game.rewards) else 0)
 
         xd = game.pacman.position[1] - self.position[1]
         yd = game.pacman.position[0] - self.position[0]
@@ -103,20 +104,20 @@ class Ghost:
             self.position += game.moves['D' if yd > 0 else 'U']
 
         cell = game.arena[self.position[0], self.position[1]]
-        if cell == 'P':
+        if cell == 1:
             game.respawn = True
             game.lives -= 1
             if game.lives == 0:
                 game.gameover = True
 
-        game.arena[self.position[0], self.position[1]] = 'x'
+        game.arena[self.position[0], self.position[1]] = 2
 
 
 class PacManGame:
     def __init__(self):
-        self.arena = np.full((15, 15), '.', dtype='<U1')
+        self.arena = np.full((15, 15), 0, dtype=np.int8)
         self.pacman = PacMan()
-        self.arena[7, 7] = 'P'
+        self.arena[7, 7] = 1
         self.moves = {
             'U': np.array([-1, 0]),
             'D': np.array([1, 0]),
@@ -134,14 +135,14 @@ class PacManGame:
         if len(self.rewards) < 5:
             r = Reward()
             r.activate(self.pacman)
-            self.arena[r.position[0], r.position[1]] = 'o'
+            self.arena[r.position[0], r.position[1]] = 3
             self.rewards.append(r)
 
     def new_ghost(self):
         if len(self.ghosts) < 3:
             g = Ghost()
             g.activate(self.pacman)
-            self.arena[g.position[0], g.position[1]] = 'x'
+            self.arena[g.position[0], g.position[1]] = 2
             self.ghosts.append(g)
 
     def _render_arena(self):
@@ -158,12 +159,12 @@ class PacManGame:
             cells = []
             for col in range(15):
                 val = self.arena[row, col]
-                if val == 'P':
+                if val == 1:
                     ch = PACMAN_CHARS.get(self.pacman.direction, 'ᗤ')
                     cells.append(Text(f'{ch} ', style='bold yellow'))
-                elif val == 'x':
+                elif val == 2:
                     cells.append(Text('ᗣ ', style='bold red'))
-                elif val == 'o':
+                elif val == 3:
                     cells.append(Text('● ', style='bold cyan'))
                 else:
                     cells.append(Text('· ', style='dim #444444'))
@@ -234,10 +235,14 @@ class PacManGame:
         console.print()
         input('Press Enter to exit...')
 
-    def start(self):
+    def start(self, action_fn=None):
         with Live(console=console, refresh_per_second=10, screen=True) as live:
             while not self.gameover:
-                self.pacman.move(self, random.choice(list(self.moves.keys())))
+                if action_fn is None:
+                    direction = random.choice(list(self.moves.keys()))
+                else:
+                    direction = action_fn(self)
+                self.pacman.move(self, direction)
                 for ghost in self.ghosts:
                     ghost.move(self)
                 if random.random() < 0.1:
@@ -249,10 +254,4 @@ class PacManGame:
                 live.update(content)
 
         self._print_gameover()
-            
-            
-
-
-if __name__ == '__main__':
-    game = PacManGame()
-    game.start()
+    
