@@ -8,7 +8,7 @@ class PacManEnv(gym.Env):
 
     def __init__(self):
         self.pacman_game = PacManGame()
-        self.observation_space = gym.spaces.Box(0, 3, (15,15), np.int8)
+        self.observation_space = gym.spaces.Box(0, 1, (4,15,15), np.int8)
         self.action_space = gym.spaces.Discrete(4)
         self.max_steps = 500
         self.step_count = 0
@@ -21,7 +21,26 @@ class PacManEnv(gym.Env):
         }
 
     def _get_obs(self):
-        return self.pacman_game.arena
+        arena = self.pacman_game.arena
+        # Create 4 binary planes: 0=Empty, 1=PacMan, 2=Ghost, 3=Pellet
+        obs = np.zeros((4, 15, 15), dtype=np.int8)
+    
+        for i in range(4):
+            obs[i] = (arena == i).astype(np.int8)
+        return obs
+    
+    def _get_distance_to_nearest_pellet(self):
+        """Calculates Manhattan distance in a toroidal (wrapping) grid."""
+        pacman_pos = self.pacman_game.pacman.position
+        pellet_indices = np.argwhere(self.pacman_game.arena == 3)
+        if len(pellet_indices) == 0:
+            return 0
+        
+        # Calculate distance considering the 15x15 wrap-around
+        diff = np.abs(pellet_indices - pacman_pos)
+        wrapped_diff = np.minimum(diff, 15 - diff)
+        distances = wrapped_diff.sum(axis=1)
+        return np.min(distances)
     
     def _get_info(self):
         return {
@@ -47,6 +66,7 @@ class PacManEnv(gym.Env):
 
         score = self.pacman_game.score
         lives = self.pacman_game.lives 
+        before_distance = self._get_distance_to_nearest_pellet()
 
         self.pacman_game.pacman.move(self.pacman_game, direction)
         for ghost in self.pacman_game.ghosts:
@@ -56,12 +76,21 @@ class PacManEnv(gym.Env):
         if random.random() < 0.05:
             self.pacman_game.new_ghost()
 
+        after_distance = self._get_distance_to_nearest_pellet()
         terminated = self.pacman_game.gameover
         truncated = self.step_count >= self.max_steps
         
-        reward = 10 if self.pacman_game.score > score else -1 if len(self.pacman_game.rewards) > 0 else 0
-        reward -= 50 if self.pacman_game.lives < lives else 0
-        reward -= 50 if terminated else 0
+        reward = -0.1
+
+        reward += 50 if self.pacman_game.score > score else 0
+        reward -= 100 if self.pacman_game.lives < lives else 0
+        reward -= 100 if terminated else 0
+
+        if before_distance > 0 and after_distance > 0:
+            if after_distance < before_distance:
+                reward += 1.0  
+            elif after_distance > before_distance:
+                reward -= 1.2
 
         observation = self._get_obs()
         info = self._get_info()
