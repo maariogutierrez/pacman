@@ -130,6 +130,8 @@ class PacManGame:
         self.ghosts = []
         self.respawn = False
         self.gameover = False
+        self.visit_counts = np.zeros((15, 15), dtype=np.float32)
+        self.visit_decay = 0.99
 
     def new_reward(self):
         if len(self.rewards) < 5:
@@ -238,10 +240,15 @@ class PacManGame:
     def start(self, action_fn=None):
         with Live(console=console, refresh_per_second=10, screen=True) as live:
             while not self.gameover:
+                self.visit_counts *= self.visit_decay  
+                pos = self.pacman.position
+                self.visit_counts[pos[0], pos[1]] += 1
+
                 if action_fn is None:
                     direction = random.choice(list(self.moves.keys()))
                 else:
                     direction = action_fn(self)
+
                 self.pacman.move(self, direction)
                 for ghost in self.ghosts:
                     ghost.move(self)
@@ -249,6 +256,7 @@ class PacManGame:
                     self.new_reward()
                 if random.random() < 0.05:
                     self.new_ghost()
+
                 content = self._print_frame()
                 time.sleep(0.4)
                 live.update(content)

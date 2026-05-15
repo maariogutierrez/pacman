@@ -3,15 +3,18 @@ import numpy as np
 from typing import Optional
 from pacman import PacManGame
 import random
+from collections import deque
 
 class PacManEnv(gym.Env):
 
     def __init__(self):
         self.pacman_game = PacManGame()
-        self.observation_space = gym.spaces.Box(0, 1, (4,15,15), np.int8)
+        self.observation_space = gym.spaces.Box(0, 1, (5,15,15), np.float32)
         self.action_space = gym.spaces.Discrete(4)
         self.max_steps = 500
         self.step_count = 0
+        self.visit_counts = np.zeros((15, 15), dtype=np.float32)
+        self.visit_decay = 0.99 
 
         self._action_to_direction = {
             0: 'U',   
@@ -22,11 +25,13 @@ class PacManEnv(gym.Env):
 
     def _get_obs(self):
         arena = self.pacman_game.arena
-        # Create 4 binary planes: 0=Empty, 1=PacMan, 2=Ghost, 3=Pellet
-        obs = np.zeros((4, 15, 15), dtype=np.int8)
+        # Create 5 binary planes: 0=Empty, 1=PacMan, 2=Ghost, 3=Pellet, 4=Visits heatmap
+        obs = np.zeros((5, 15, 15), dtype=np.float32)
     
         for i in range(4):
-            obs[i] = (arena == i).astype(np.int8)
+            obs[i] = (arena == i).astype(np.float32)
+
+        obs[4] = np.clip(self.visit_counts / 10.0, 0, 1)
         return obs
     
     def _get_distance_to_nearest_pellet(self):
@@ -53,6 +58,8 @@ class PacManEnv(gym.Env):
 
         self.pacman_game = PacManGame()
         self.step_count = 0
+        self.position_history = deque(maxlen=6)
+        self.visit_counts = np.zeros((15, 15), dtype=np.float32)
 
         observation = self._get_obs()
         info = self._get_info()
@@ -61,6 +68,10 @@ class PacManEnv(gym.Env):
     
     def step(self, action):
         self.step_count += 1
+
+        self.visit_counts *= self.visit_decay  
+        pos = self.pacman_game.pacman.position
+        self.visit_counts[pos[0], pos[1]] += 1
 
         direction = self._action_to_direction[action]
 
@@ -71,26 +82,35 @@ class PacManEnv(gym.Env):
         self.pacman_game.pacman.move(self.pacman_game, direction)
         for ghost in self.pacman_game.ghosts:
             ghost.move(self.pacman_game)
+
+        after_distance = self._get_distance_to_nearest_pellet()
+
         if random.random() < 0.1:
             self.pacman_game.new_reward()
         if random.random() < 0.05:
             self.pacman_game.new_ghost()
 
-        after_distance = self._get_distance_to_nearest_pellet()
         terminated = self.pacman_game.gameover
         truncated = self.step_count >= self.max_steps
         
-        reward = -0.1
+        reward = -0.01 # time penalty
+        
+        pos = tuple(self.pacman_game.pacman.position)
+        if pos in self.position_history:
+            reward -= 0.5 # loop avoidance penalty 
+        self.position_history.append(pos)
 
-        reward += 50 if self.pacman_game.score > score else 0
-        reward -= 100 if self.pacman_game.lives < lives else 0
-        reward -= 100 if terminated else 0
+        pellet_eaten = self.pacman_game.score > score
+        reward += 1.0 if pellet_eaten else 0 # pellet eaten reward
 
-        if before_distance > 0 and after_distance > 0:
+        if self.pacman_game.lives < lives:
+            reward -= 2.0 # lost life penalty
+
+        if not pellet_eaten and before_distance > 0 and after_distance > 0:
             if after_distance < before_distance:
-                reward += 1.0  
+                reward += 0.05  # go to pellet reward
             elif after_distance > before_distance:
-                reward -= 1.2
+                reward -= 0.06 # don't go to pellet penalty
 
         observation = self._get_obs()
         info = self._get_info()

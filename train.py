@@ -40,7 +40,7 @@ class LatestReplayBufferCheckpoint(CheckpointCallback):
 
         if self.save_replay_buffer:
             checkpoint_dir = Path(self.save_path)
-            replay_buffers = sorted(checkpoint_dir.glob(f"{self.name_prefix}_replay_buffer_*_steps.pkl"))
+            replay_buffers = sorted(checkpoint_dir.glob(f"{self.name_prefix}_replay_buffer_*_steps.pkl"), reverse=True)
             if len(replay_buffers) > 1:
                 for replay_buffer_path in replay_buffers[:-1]:
                     replay_buffer_path.unlink(missing_ok=True)
